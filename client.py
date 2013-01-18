@@ -4,6 +4,8 @@ from OSC import OSCClient, OSCMessage
 
 class OSCLeapListener(Leap.Listener):
 
+    DEBUG = True
+
     def __init__(self, *args, **kwargs):
         self.client = kwargs.pop('client', OSCClient())
         self.hostname = kwargs.pop('hostname','localhost')
