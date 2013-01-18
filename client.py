@@ -34,10 +34,11 @@ class OSCLeapListener(Leap.Listener):
         print "Exited from OSC Leap Listener"
 
     def send(self,name,val=None):
+        msg = OSCMessage(name)
         if val:
-            return self.client.send(OSCMessage(name, val))
-        else:
-            return self.client.send(OSCMessage(name))
+            msg.append(val)
+        print msg
+        return self.client.send(msg)
 
     def send_vector(self, base, vector):
         self.send("%sx" % base, vector[0])
@@ -54,10 +55,10 @@ class OSCLeapListener(Leap.Listener):
             print "Received frame #%d" % self.frame_count
 
         for hand in frame.hands:
-            hand_base = "/hand%d/" % hand.id
+            hand_base = "/hand%d" % hand.id
 
             ## Handle fingers
-            for finger in hand.finger:
+            for finger in hand.fingers:
                 self.send_vector("%s/finger%d/t" % (hand_base,finger.id),
                             finger.tip_position)
                 self.send_vector("%s/finger%d/d" % (hand_base,finger.id),
