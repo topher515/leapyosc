@@ -1,4 +1,5 @@
 import Leap, sys
+import OSC
 from OSC import OSCClient, OSCMessage
 
 
@@ -10,22 +11,27 @@ class OSCLeapListener(Leap.Listener):
         self.client = kwargs.pop('client', OSCClient())
         self.hostname = kwargs.pop('hostname','localhost')
         self.port = kwargs.pop('port',7110)
+        print "Connecting to OSC server at '%s:%s'" % (self.hostname,self.port)
         self.client.connect( (self.hostname, self.port) )
+        self.frame_count = 0
         super(OSCLeapListener,self).__init__(*args,**kwargs)
 
     def on_init(self, controller):
         self.send("/init")
-        print "Initialized"
+        print "Initialized OSC-Leap Listener"
 
-    # def on_connect(self, controller):
-    #     print "Connected"
+    def on_connect(self, controller):
+        print "Connected to Leap"
 
-    # def on_disconnect(self, controller):
-    #     print "Disconnected"
+    def on_disconnect(self, controller):
+        print "Disconnected from Leap"
 
     def on_exit(self, controller):
-        self.send("/quit")
-        print "Exited"
+        try:
+            self.send("/quit")
+        except OSC.OSCClientError:
+            print "Disconnected from OSC server (unable to quit gracefully)"
+        print "Exited from OSC Leap Listener"
 
     def send(self,name,val=None):
         if val:
@@ -39,10 +45,13 @@ class OSCLeapListener(Leap.Listener):
         self.send("%sz" % base, vector[2])
 
     def on_frame(self, controller):
-        # Get the most recent frame and report some basic information
         frame = controller.frame()
+        self.frame_count += 1
         #print "Frame id: %d, timestamp: %d, hands: %d, fingers: %d, tools: %d" % (
         #      frame.id, frame.timestamp, len(frame.hands), len(frame.fingers), len(frame.tools))
+
+        if self.DEBUG and self.frame_count % 500 == 0:
+            print "Received frame #%d" % self.frame_count
 
         for hand in frame.hands:
             hand_base = "/hand%d/" % hand.id
@@ -76,4 +85,4 @@ def main(hostname="localhost",port="7110"):
 
 
 if __name__ == "__main__":
-    main(*sys.argv)
+    main(*sys.argv[1:])
