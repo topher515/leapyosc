@@ -14,6 +14,7 @@ class OSCLeapListener(Leap.Listener):
         print "Connecting to OSC server at '%s:%s'" % (self.hostname,self.port)
         self.client.connect( (self.hostname, self.port) )
         self.frame_count = 0
+        self.saw_finger = False
         super(OSCLeapListener,self).__init__(*args,**kwargs)
 
     def on_init(self, controller):
@@ -37,7 +38,7 @@ class OSCLeapListener(Leap.Listener):
         msg = OSCMessage(name)
         if val:
             msg.append(val)
-        print msg
+        #print msg
         return self.client.send(msg)
 
     def send_vector(self, base, vector):
@@ -51,11 +52,21 @@ class OSCLeapListener(Leap.Listener):
         #print "Frame id: %d, timestamp: %d, hands: %d, fingers: %d, tools: %d" % (
         #      frame.id, frame.timestamp, len(frame.hands), len(frame.fingers), len(frame.tools))
 
-        if self.DEBUG and self.frame_count % 500 == 0:
-            print "Received frame #%d" % self.frame_count
+        if self.DEBUG and (self.frame_count == 1 or self.frame_count % 100 == 0):
+            #print "Received frame #%d" % self.frame_count
+            if self.saw_finger:
+                sys.stderr.write('f')
+            else:
+                sys.stderr.write(".")
+            sys.stderr.flush()
 
         for hand in frame.hands:
             hand_base = "/hand%d" % hand.id
+
+            if hand.fingers.empty:
+                self.saw_finger = False
+            else:
+                self.saw_finger = True
 
             ## Handle fingers
             for finger in hand.fingers:
@@ -64,16 +75,17 @@ class OSCLeapListener(Leap.Listener):
                 self.send_vector("%s/finger%d/d" % (hand_base,finger.id),
                             finger.direction)
 
+
             ## Handle palm
             # Relative point position of palm
             self.send_vector("%s/palm/t" % hand_base, hand.palm_position)
             # Normal to the plane of the palm
-            self.send_vector("%s/palm/n" % hand_base, hand.palm_normal) 
+            self.send_vector("%s/palm/d" % hand_base, hand.palm_normal) 
             # Direction pointing from palm to fingers
-            self.send_vector("%s/palm/d" % hand_base, hand.palm_direction)
+            # self.send_vector("%s/palm/d" % hand_base, hand.palm_direction)
 
 
-def main(hostname="localhost",port="7110"):
+def main(hostname="10.0.1.83",port="8000"):
     # Create a sample listener and controller
     listener = OSCLeapListener(hostname=hostname, port=int(port))
     controller = Leap.Controller()
