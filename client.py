@@ -6,51 +6,109 @@ from datetime import datetime
 from itertools import count
 
 
-{
-    'last_seen'
+class RealHand(Leap.Hand):
 
-}
+    def __init__(self, hand, tracker, *args, **kwargs):
+        self._hand = hand
+        self.zeroed = False
+        self.tracker = tracker
+        self.tracker.claim_next_real_number(self)
+        self.last_seen_frame = None
+        self.mark_seen()
+
+    @property
+    def id(self):
+        return self.tracker.get_real_number(self)
+
+    @property
+    def leap_id(self):
+        return self._hand.id
+
+    @property
+    def palm_position(self):
+        return (0,0,0) if self.zeroed else self._hand.palm_position
+
+    @property
+    def palm_normal(self):
+        return (0,0,0) if self.zeroed else self._hand.palm_normal
+
+    def __getattr__(self, key):
+        return getattr(self._hand, key)
+
+    def __setattr__(self, key, value):
+        return setattr(self._hand, key, value)
+
+    def mark_seen(self):
+        self.last_seen_frame = self.tracker.frame_count
 
 
 class RealHandTracker(object):
+    """
+    Ensures a consistent hand tracker and numbering system
+    """
 
     def __init__(self, hand_miss_count=5):
         self._real_hands = {}
-        self._by_id = {}
+        self._by_leap_id = {}
         self.hand_miss_count = hand_miss_count
         self.frame_count = 0
+        self.current_frame = None
 
     def get_real_number(self, hand):
-        return self._by_id.get(hand.id)
+        return self._by_leap_id.get(hand.id)
+    def get_real_hand(self, hand):
+        return self._real_hands.get(self.get_real_number(hand))
+
+    def is_old_hand(self, real_hand):
+        return (self.frame_count - real_hand.last_seen_frame) >= self.hand_miss_count
+
+    def is_really_old_hand(self, real_hand):
+        return (self.frame_count - real_hand.last_seen_frame) >= (self.hand_miss_count * 2)
+
+    def handle_old_hand(self, real_hand):
+        # Zero out the old hand
+        real_hand.zeroed = True
+
+    def handle_really_old_hand(self, real_hand):
+        # Completely remove the real hand from our tracking
+        del self._real_hands[real_hand.id]
+        del self._by_leap_id[real_hand.leap_id]
 
     def frame_tick(self, frame):
+        self.current_frame = frame
         self.frame_count += 1
 
-        for real_num, hand_data in self._real_hands.items():
-            last_seen_frame, real_hand = hand_data
-            if self.frame_count - last_seen_frame >= self.hand_miss_count:
-                # This real hand data is old! Purge it!
-                del self._real_hands[real_num]
-                del self._by_id[real_hand.id]
+        # Deal with old hands
+        for real_hand in self._real_hands.values():
+            if self.is_old_hand(real_hand):
+                self.handle_old_hand(real_hand)
+            if self.is_really_old_hand(real_hand):
+                # This real hand data is really old! Purge it!
+                self.handle_old_hand(real_hand)
 
-        for hand in frame.hands:
-            self.handle(hand)
+        # Deal with current hands
+        for raw_hand in frame.hands:
+            self.handle_raw_hand(raw_hand)
+
+    def handle_raw_hand(self, raw_hand):
+        real_hand = self.get_real_hand(raw_hand)
+        if real_hand:
+            real_hand.mark_seen()
+        else:
+            real_hand = RealHand(raw_hand, self)
 
 
-    def handle(self, hand):
-        real_num = self.get_real_number(hand)
-        if real_num:
-            # We found the real number for this hand, we're done
-            return 
-
-        real_num = self.get_next_real_number()
-        self._by_id[hand.id] = real_num
-        self._real_hands[real_num] = (self.frame_count, hand)
-
-    def get_next_real_number(self):
+    def claim_next_real_number(self, real_hand):
         for i in count(1):
-            if self._real_hands.get(i):
-                return i
+            existing_real_hand = self._real_hands.get(i)
+            if existing_real_hand:
+                if existing_real_hand.zeroed:
+                    self._real_hands[i] = real_hand
+                    self._by_leap_id[real_hand.leap_id] = i
+            else:
+                self._real_hands[i] = real_hand
+                self._by_leap_id[real_hand.leap_id] = i
+
 
     @property
     def hands(self):
@@ -65,7 +123,6 @@ class RealHandTracker(object):
                 yield r
 
 
-
 class OSCLeapListener(Leap.Listener):
 
     DEBUG = True
@@ -75,15 +132,12 @@ class OSCLeapListener(Leap.Listener):
         self.saw_finger = False
         # Settings
         self.client = kwargs.pop('client', OSCClient())
-        self.hostname = kwargs.pop('hostname','localhost')
-        self.port = kwargs.pop('port',7110)
-        self.dumb = kwargs.pop('dumb',False)
+        self.hostname = kwargs.pop('hostname', 'localhost')
+        self.port = kwargs.pop('port', 7110)
+        self.dumb = kwargs.pop('dumb', False)
         # OSC Connect
         print "Connecting to OSC server at '%s:%s'" % (self.hostname,self.port)
         self.client.connect((self.hostname, self.port))
-
-        self.real_hand_tracker = RealHandTracker()
-
         super(OSCLeapListener,self).__init__(*args,**kwargs)
 
     def on_init(self, controller):
@@ -115,45 +169,18 @@ class OSCLeapListener(Leap.Listener):
         self.send("%sy" % base, vector[1])
         self.send("%sz" % base, vector[2])
 
-    def _on_frame_smart(self, controller):
-        frame = controller.frame()
-
-        self.real_hand_tracker.frame_tick(frame)
-        for hand in self.real_hand_tracker.hands:
-
-
-
-
-            hand_dict = hand_db.get(hand.id):
-            if hand_dict:
-
-            else:
-                hand_db[hand.id] = {
-                    ""
-                }
-
-
-            else:
-                # New hand!
-                ["ts"] = datetime.now()
-
-
-            hand_base = "/hand%d" % hand.id
-
-
 
     def on_frame(self, controller):
-        self.frame_count += 1
-        if self.dumb:
-            return self._on_frame_dumb(controller)
-        else:
-            return self._on_frame_smart(controller)
-
-    def _on_frame_dumb(self, controller):
+        self.frame_count += 1 
         frame = controller.frame()
+        self.send_frame_data(frame)
+
+    def get_hands(self, frame):
+        return frame.hands
+
+    def send_frame_data(self, frame):
         #print "Frame id: %d, timestamp: %d, hands: %d, fingers: %d, tools: %d" % (
         #      frame.id, frame.timestamp, len(frame.hands), len(frame.fingers), len(frame.tools))
-
         if self.DEBUG and (self.frame_count == 1 or self.frame_count % 100 == 0):
             #print "Received frame #%d" % self.frame_count
             if self.saw_finger:
@@ -162,7 +189,7 @@ class OSCLeapListener(Leap.Listener):
                 sys.stderr.write(".")
             sys.stderr.flush()
 
-        for hand in frame.hands:
+        for hand in self.get_hands(frame):
             hand_base = "/hand%d" % hand.id
 
             if hand.fingers.empty:
@@ -177,7 +204,6 @@ class OSCLeapListener(Leap.Listener):
                 self.send_vector("%s/finger%d/d" % (hand_base,finger.id),
                             finger.direction)
 
-
             ## Handle palm
             # Relative point position of palm
             self.send_vector("%s/palm/t" % hand_base, hand.palm_position)
@@ -187,9 +213,24 @@ class OSCLeapListener(Leap.Listener):
             # self.send_vector("%s/palm/d" % hand_base, hand.palm_direction)
 
 
-def main(hostname="10.0.1.83",port="8000"):
+class TrackingOSCLeapListener(OSCLeapListener):
+
+    def __init__(self, *args, **kwargs):
+        super(TrackingOSCLeapListener, self).__init__(*args,**kwargs)
+        self.real_hand_tracker = RealHandTracker()
+
+    def on_frame(self, controller):
+        self.real_hand_tracker.frame_tick(controller.frame)
+        r = super(TrackingOSCLeapListener,self).on_frame(controller)
+        return r
+
+    def get_hands(self, frame):
+        return self.real_hand_tracker.hands
+
+
+def main(hostname="localhost",port="8000"):
     # Create a sample listener and controller
-    listener = OSCLeapListener(hostname=hostname, port=int(port))
+    listener = TrackingOSCLeapListener(hostname=hostname, port=int(port))
     controller = Leap.Controller()
     controller.add_listener(listener)
 
