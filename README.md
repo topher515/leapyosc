@@ -6,18 +6,20 @@
 
 Tested on Mac OS X 10.8 Lion
 
+
 ### Pre-requisites:
 - The Leap_SDK folder
 - pyOSC
 
 ### Important files
 
+<pre>
 + LeapProject
 |--+ Leap_SDK
 |--+ leapyosc           # This repository folder
    |--+ bootstrap.sh    # Setup a virtualenv in folder `ve`; install pyOSC into it
    |--+ client.sh       # For running the OSC client
-
+</pre>
 
 ### Usage
 
