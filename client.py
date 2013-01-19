@@ -6,6 +6,8 @@ from datetime import datetime
 from itertools import count
 
 
+DEBUG = True
+
 def log(m):
     sys.stderr.write(m)
     sys.stderr.flush()
@@ -156,8 +158,6 @@ class RealHandTracker(object):
 
 class OSCLeapListener(Leap.Listener):
 
-    DEBUG = True
-
     def __init__(self, *args, **kwargs):
         self.frame_count = 0
         self.saw_finger = False
@@ -212,7 +212,7 @@ class OSCLeapListener(Leap.Listener):
     def send_frame_data(self, frame):
         #print "Frame id: %d, timestamp: %d, hands: %d, fingers: %d, tools: %d" % (
         #      frame.id, frame.timestamp, len(frame.hands), len(frame.fingers), len(frame.tools))
-        if self.DEBUG and (self.frame_count == 1 or self.frame_count % 100 == 0):
+        if DEBUG and (self.frame_count == 1 or self.frame_count % 100 == 0):
             #print "Received frame #%d" % self.frame_count
             if self.saw_finger:
                 sys.stderr.write('f')
