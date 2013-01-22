@@ -9,12 +9,17 @@ from itertools import count
 DEBUG = True
 
 def log(m):
-    sys.stderr.write(m)
+    sys.stderr.write(str(m))
     sys.stderr.flush()
 
 
 class RealPart(object):
-    NOT_PROXIED = set(['_raw_part','zeroed','tracker','last_seen_frame'])
+    """
+    Abstract class which is the base for the RealFinger and RealHand object
+    """
+
+    NOT_PROXIED = set(['_raw_part','zeroed','tracker','last_seen_frame',
+                    'fingers'])
 
     def __init__(self, part, tracker, *args, **kwargs):
         self._raw_part = part
@@ -48,7 +53,12 @@ class RealPart(object):
         self.last_seen_frame = self.tracker.frame_count
 
 
-class RealFinger(object):
+class RealFinger(RealPart):
+    """
+    Wraps the `Leap.Finger` class and provides a consistent interface
+    while creating sane finger IDs.
+    """
+
     @property
     def tip_position(self):
         return (0,0,0) if self.zeroed else self._raw_part.tip_position
@@ -57,11 +67,54 @@ class RealFinger(object):
     def direction(self):
         return (0,0,0) if self.zeroed else self._raw_part.direction
 
+    def __str__(self):
+        return "<Finger%s>" % self.id
 
-class RealHand(object):
+
+
+class RealHand(RealPart):
+    """
+    Wraps the `Leap.Hand` class and provides a consistent interface
+    while creating sane finger IDs.
+    """
+
     def __init__(self, part, tracker, *args, **kwargs):
         super(RealHand, self).__init__(part, tracker, *args, **kwargs)
         self.finger_tracker = RealFingerTracker()
+        self.fingers = self.FingerContainer(self)
+
+    def __str__(self):
+        def apply_(f):
+            if f:
+                if f.zeroed:
+                    return "0"
+                else:
+                    return "|"
+            else:
+                return " "
+        fings = [apply_(x) for x in self.finger_tracker.get_real_parts_or_none()]
+        return """<Hand%s %s>""" % (self.id, "".join(fings))
+
+
+    class FingerContainer(object):
+
+        def __init__(self, real_hand):
+            self.real_hand = real_hand
+
+        @property
+        def empty(self):
+            return len(self.real_hand.finger_tracker) == 0
+
+        # def __iter__(self):
+        #     return self
+
+        # def next(self):
+        #     for real_finger in self.real_hand.finger_tracker.get_real_parts():
+        #         yield real_finger
+
+        def __iter__(self):
+            for real_finger in self.real_hand.finger_tracker.get_real_parts():
+                yield real_finger
 
     @property
     def palm_position(self):
@@ -72,29 +125,41 @@ class RealHand(object):
         return (0,0,0) if self.zeroed else self._raw_part.palm_normal
 
     @property
-    def fingers(self):
+    def __fingers(self):
         for finger in self._raw_part.fingers():
-            yield RealFinger(Finger, self.finger_tracker)
+            yield RealFinger(finger, self.finger_tracker)
+
 
 
 class RealPartTracker(object):
     """
-    Ensures a consistent hand tracker and numbering system
+    Ensures a consistent id numbering system for the body part
     """
 
     RealPart = None # Class
 
-    def __init__(self, hand_miss_count=5):
+    def __init__(self, part_miss_count=5):
         self._real_parts = {}
         self._by_leap_id = {}
         self.part_miss_count = part_miss_count
         self.frame_count = 0
-        self.current_frame = None
 
-    def get_real_number(self, hand):
-        return self._by_leap_id.get(hand.id)
-    def get_real_part(self, hand):
-        return self._real_parts.get(self.get_real_number(hand))
+    #def __str__(self):
+    #    def _(x):
+    #        return self._real_parts.get(x,None)
+    #    return "%s_tracker: [%s,%s,%s,%s,%s,%s]\n" % \
+    #                        (self.part_name, _(0),_(1),_(2),_(3),_(4),_(5))
+
+    def __len__(self):
+        return len([x for x in self.get_real_parts() if not x.zeroed])
+
+    def get_raw_parts(self, raw_parent):
+        raise NotImplementedError
+
+    def get_real_number(self, raw_part):
+        return self._by_leap_id.get(raw_part.id)
+    def get_real_part(self, raw_part):
+        return self._real_parts.get(self.get_real_number(raw_part))
 
     def is_old_part(self, real_part):
         return (self.frame_count - real_part.last_seen_frame) >= self.part_miss_count
@@ -111,12 +176,11 @@ class RealPartTracker(object):
         del self._real_parts[real_part.id]
         del self._by_leap_id[real_part.leap_id]
 
-    def handle_parent_tick(self, parent):
+    def handle_parent_tick(self, raw_parent):
 
-        sys.stderr.write('.')
-        sys.stderr.flush()
+        #sys.stderr.write('.')
+        #sys.stderr.flush()
 
-        self.current_frame = frame
         self.frame_count += 1
 
         # Deal with old hands
@@ -127,14 +191,8 @@ class RealPartTracker(object):
                 # This real hand data is really old! Purge it!
                 self.handle_really_old_part(real_part)
 
-        # Deal with current hands
-        for raw_part in self.get_raw_parts(parent):
+        for raw_part in self.get_raw_parts(raw_parent):
             self.handle_raw_part(raw_part)
-
-        if DEBUG:
-            def _(x):
-                return self._real_parts.get(x,None)
-            log("[%s,%s,%s,%s,%s]\n" % (_(0),_(1),_(2),_(3),_(4)))
 
 
     def handle_raw_part(self, raw_part):
@@ -142,9 +200,7 @@ class RealPartTracker(object):
         if real_part:
             real_part.mark_seen()
         else:
-            #log('N')
             real_part = self.RealPart(raw_part, tracker=self)
-        #log(str(real_part.id))
 
     def claim_next_real_number(self, real_part):
         real_num = None
@@ -162,24 +218,38 @@ class RealPartTracker(object):
             self._real_parts[real_num] = real_part
             self._by_leap_id[real_part.leap_id] = real_num
 
-    def get_real_parts(self):
+    def get_real_parts_or_none(self):
         real_part_count = len(self._real_parts)
         r_counter = 0
         for i in count(1):
             if r_counter == real_part_count:
                 raise StopIteration
             r = self._real_parts.get(i)
-            if r:
-                r_counter += 1
-                yield r
+            r_counter += 1
+            yield r
+
+    def get_real_parts(self):
+        return filter(None, self.get_real_parts_or_none())
 
 
 class RealHandTracker(RealPartTracker):
     part_name = "hand"
-    real_part = RealHand
+    RealPart = RealHand
 
-    def get_raw_parts(self, parent): # Frame is parent
-        return frame.hands
+    def get_raw_parts(self, raw_parent): # Frame is parent
+        return raw_parent.hands
+
+    def frame_tick(self, frame):
+        self.handle_parent_tick(frame)
+        # All of the real hands should now be updated 
+        # from this frame's raw hands
+
+        for raw_hand in self.get_raw_parts(frame):
+            # Take each raw hand in this frame and find its corresponding real hadn
+            real_hand = self.get_real_part(raw_hand)
+            # Then pass the raw hand data to this real_hand's finger tracker
+            real_hand.finger_tracker.handle_parent_tick(raw_hand)
+
 
     @property
     def hands(self):
@@ -188,12 +258,20 @@ class RealHandTracker(RealPartTracker):
 
 class RealFingerTracker(RealPartTracker):
     part_name = "finger"
-    real_part = RealFinger
+    RealPart = RealFinger
 
-    def get_raw_parts(self, parent): # Hand is parent
-        return parent.fingers
 
-    @property(self):
+
+    def get_real_number(self, raw_part):
+        return self._by_leap_id.get(raw_part.id)
+
+    def is_old_part(self, real_part):
+        return super(RealFingerTracker, self).is_old_part(real_part)
+
+    def get_raw_parts(self, raw_parent): # Hand is parent
+        return raw_parent.fingers
+
+    @property
     def fingers(self):
         return self.get_real_parts()
 
@@ -246,21 +324,16 @@ class OSCLeapListener(Leap.Listener):
     def on_frame(self, controller):
         self.frame_count += 1 
         frame = controller.frame()
-        self.send_frame_data(frame)
+
+        for hand in self.get_hands(frame):
+            log("%s" % hand)
+        log("\n")
+        #self.send_frame_data(frame)
 
     def get_hands(self, frame):
         return frame.hands
 
     def send_frame_data(self, frame):
-        #print "Frame id: %d, timestamp: %d, hands: %d, fingers: %d, tools: %d" % (
-        #      frame.id, frame.timestamp, len(frame.hands), len(frame.fingers), len(frame.tools))
-        if DEBUG and (self.frame_count == 1 or self.frame_count % 100 == 0):
-            #print "Received frame #%d" % self.frame_count
-            if self.saw_finger:
-                sys.stderr.write('f')
-            else:
-                sys.stderr.write(".")
-            sys.stderr.flush()
 
         for hand in self.get_hands(frame):
 
@@ -291,15 +364,15 @@ class TrackingOSCLeapListener(OSCLeapListener):
 
     def __init__(self, *args, **kwargs):
         super(TrackingOSCLeapListener, self).__init__(*args,**kwargs)
-        self.real_part_tracker = RealHandTracker()
+        self.real_hands_tracker = RealHandTracker()
 
     def on_frame(self, controller):
-        self.real_part_tracker.frame_tick(controller.frame())
+        self.real_hands_tracker.frame_tick(controller.frame())
         r = super(TrackingOSCLeapListener,self).on_frame(controller)
         return r
 
     def get_hands(self, frame):
-        return self.real_part_tracker.hands
+        return self.real_hands_tracker.hands
 
 
 def main(hostname="localhost",port="8000"):
