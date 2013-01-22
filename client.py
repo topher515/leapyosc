@@ -321,14 +321,23 @@ class OSCLeapListener(Leap.Listener):
         self.send("%sz" % base, vector[2])
 
 
+    def print_frame(self, frame):
+        any_ = False
+        for hand in self.get_hands(frame):
+            any_ = True
+            log("%s" % hand)
+        if any_:
+            log("\n")
+        else:
+            log("No hands detected.\n")
+
+
     def on_frame(self, controller):
         self.frame_count += 1 
         frame = controller.frame()
-
-        for hand in self.get_hands(frame):
-            log("%s" % hand)
-        log("\n")
-        #self.send_frame_data(frame)
+        if DEBUG:
+            self.print_frame(frame)
+        self.send_frame_data(frame)
 
     def get_hands(self, frame):
         return frame.hands
