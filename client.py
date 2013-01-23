@@ -1,8 +1,8 @@
 import Leap, sys
 import OSC
-from OSC import OSCClient, OSCMessage
+from OSC import OSCClient, OSCMessage, OSCBundle
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timedelta
 from itertools import count
 
 
@@ -21,7 +21,7 @@ class RealPart(object):
     NOT_PROXIED = set(['_raw_part','zeroed','tracker','last_seen_frame',
                     'fingers'])
 
-    def __init__(self, part, tracker, *args, **kwargs):
+    def __init__(self, part, tracker):
         self._raw_part = part
         self.zeroed = False
         self.tracker = tracker
@@ -280,6 +280,7 @@ class OSCLeapListener(Leap.Listener):
 
     def __init__(self, *args, **kwargs):
         self.frame_count = 0
+        self.osc_messages_sent = 0
         self.saw_finger = False
         # Settings
         self.client = kwargs.pop('client', OSCClient())
@@ -290,6 +291,10 @@ class OSCLeapListener(Leap.Listener):
         print "Connecting to OSC server at '%s:%s'" % (self.hostname,self.port)
         self.client.connect((self.hostname, self.port))
         super(OSCLeapListener,self).__init__(*args,**kwargs)
+
+        self.count_at_log = 0
+        self.time_at_log = datetime.now()
+        self.osc_messages_sent_at_log = 0
 
     def on_init(self, controller):
         self.send("/init")
@@ -312,8 +317,9 @@ class OSCLeapListener(Leap.Listener):
         msg = OSCMessage(name)
         if val:
             msg.append(val)
-        #print msg
-        return self.client.send(msg)
+        r = self.client.send(msg)
+        self.osc_messages_sent += 1
+        return r
 
     def send_vector(self, base, vector):
         self.send("%sx" % base, vector[0])
@@ -332,12 +338,30 @@ class OSCLeapListener(Leap.Listener):
             log("No hands detected.\n")
 
 
+    def do_stats(self):
+        time_diff = datetime.now() - self.time_at_log
+        #log(time_diff)
+        if time_diff >= timedelta(seconds=1):
+            log("Saw %s frames; Sent %4s messges in %s.\n" % 
+                        (self.frame_count - self.count_at_log,
+                        self.osc_messages_sent - self.osc_messages_sent_at_log,
+                        time_diff))
+            self.count_at_log = self.frame_count
+            self.time_at_log = datetime.now()
+            self.osc_messages_sent_at_log = self.osc_messages_sent
+
+
     def on_frame(self, controller):
         self.frame_count += 1 
+
+        self.do_stats()
+
         frame = controller.frame()
         if DEBUG:
-            self.print_frame(frame)
+            #self.print_frame(frame)
+            pass
         self.send_frame_data(frame)
+
 
     def get_hands(self, frame):
         return frame.hands
@@ -369,7 +393,30 @@ class OSCLeapListener(Leap.Listener):
             # self.send_vector("%s/palm/d" % hand_base, hand.palm_direction)
 
 
-class TrackingOSCLeapListener(OSCLeapListener):
+class BundledOSCLeapListener(OSCLeapListener):
+
+    def __init__(self, *args, **kwargs):
+        self.current_bundle = None
+        super(BundledOSCLeapListener,self).__init__(*args,**kwargs)
+
+    def send(self, name, val=None):
+        if self.current_bundle:
+            log(self.current_bundle)
+            msg = OSCMessage(name)
+            if val is None:
+                msg.append(val)
+            self.current_bundle.append(msg)
+        else:
+            super(BundledOSCLeapListener,self).send(name,val)
+
+    def send_frame_data(self, frame):
+        self.current_bundle = OSCBundle()
+        r = super(BundledOSCLeapListener,self).send_frame_data(frame)
+        self.client.send(self.current_bundle)
+        return r
+
+
+class TrackingOSCLeapListener(BundledOSCLeapListener):
 
     def __init__(self, *args, **kwargs):
         super(TrackingOSCLeapListener, self).__init__(*args,**kwargs)

@@ -2,10 +2,18 @@ from OSC import OSCServer
 import sys
 from time import sleep
 
+message_count = 0
+
+def log(msg):
+    sys.stderr.write(str(msg))
+    sys.stderr.flush()
+
 def main(hostname="localhost",port="8000"):
     server = OSCServer((hostname, int(port)))
     server.timeout = 0
     run = True
+    global message_count
+    message_count = 0
 
     # this method of reporting timeouts only works by convention
     # that before calling handle_request() field .timed_out is 
@@ -18,7 +26,9 @@ def main(hostname="localhost",port="8000"):
     server.handle_timeout = types.MethodType(handle_timeout, server)
 
     def user_callback(path, tags, args, source):
-        print "%s %s" % (path, args)
+        log("%s %s\n" % (path, args))
+        global message_count
+        message_count += 1
 
     def quit_callback(path, tags, args, source):
         #global run
@@ -29,6 +39,7 @@ def main(hostname="localhost",port="8000"):
 
     # user script that's called by the game engine every frame
     def each_frame():
+        log("Messages received: %s\n" % message_count)
         # clear timed_out flag
         server.timed_out = False
         # handle all pending requests then return
