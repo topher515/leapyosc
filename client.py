@@ -315,7 +315,7 @@ class OSCLeapListener(Leap.Listener):
 
     def send(self,name,val=None):
         msg = OSCMessage(name)
-        if val:
+        if val is None:
             msg.append(val)
         r = self.client.send(msg)
         self.osc_messages_sent += 1
@@ -400,19 +400,21 @@ class BundledOSCLeapListener(OSCLeapListener):
         super(BundledOSCLeapListener,self).__init__(*args,**kwargs)
 
     def send(self, name, val=None):
-        if self.current_bundle:
-            log(self.current_bundle)
+        if self.current_bundle is None:
+            super(BundledOSCLeapListener,self).send(name,val)
+        else:
+            #log("Bundle: %s\n" % self.current_bundle)
             msg = OSCMessage(name)
-            if val is None:
+            if val is not None:
                 msg.append(val)
             self.current_bundle.append(msg)
-        else:
-            super(BundledOSCLeapListener,self).send(name,val)
 
     def send_frame_data(self, frame):
         self.current_bundle = OSCBundle()
         r = super(BundledOSCLeapListener,self).send_frame_data(frame)
-        self.client.send(self.current_bundle)
+        if self.current_bundle:
+            self.client.send(self.current_bundle)
+        self.current_bundle = None
         return r
 
 
