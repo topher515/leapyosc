@@ -421,12 +421,17 @@ class BundledOSCLeapListener(OSCLeapListener):
         self.current_bundle = None
         return r
 
-    # def send_vector(self, name, vector):
-    #     if hasattr(vector,'to_tuple'):
-    #         vec_tuple = vector.to_tuple()
-    #     else:
-    #         vec_tuple = vector
-    #     self.send("%sxyz" % name, vec_tuple)
+class VectorAsArgsMixin(object):
+    """
+    If vectors should be 'xyz' type addresses (with 3 float arguments)
+    then use this mixin.
+    """
+    def send_vector(self, name, vector):
+        if hasattr(vector,'to_tuple'):
+            vec_tuple = vector.to_tuple()
+        else:
+            vec_tuple = vector
+        self.send("%sxyz" % name, vec_tuple)
 
 
 class TrackingOSCLeapListener(BundledOSCLeapListener):
