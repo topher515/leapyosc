@@ -19,7 +19,7 @@ class RealPart(object):
     """
 
     NOT_PROXIED = set(['_raw_part','zeroed','tracker','last_seen_frame',
-                    'fingers'])
+                    'fingers','finger_tracker','update_raw'])
 
     def __init__(self, part, tracker):
         self._raw_part = part
@@ -31,6 +31,9 @@ class RealPart(object):
 
     def __str__(self):
         return "%s:0" % self.id if self.zeroed else "%s:X" % self.id
+
+    def update_raw(self, raw_part):
+        self._raw_part = raw_part
 
     @property
     def id(self):
@@ -61,11 +64,11 @@ class RealFinger(RealPart):
 
     @property
     def tip_position(self):
-        return (0,0,0) if self.zeroed else self._raw_part.tip_position
+        return (0.0,0.0,0.0) if self.zeroed else self._raw_part.tip_position
 
     @property
     def direction(self):
-        return (0,0,0) if self.zeroed else self._raw_part.direction
+        return (0.0,0.0,0.0) if self.zeroed else self._raw_part.direction
 
     def __str__(self):
         return "<Finger%s>" % self.id
@@ -199,6 +202,7 @@ class RealPartTracker(object):
         real_part = self.get_real_part(raw_part)
         if real_part:
             real_part.mark_seen()
+            real_part.update_raw(raw_part)
         else:
             real_part = self.RealPart(raw_part, tracker=self)
 
@@ -260,8 +264,6 @@ class RealFingerTracker(RealPartTracker):
     part_name = "finger"
     RealPart = RealFinger
 
-
-
     def get_real_number(self, raw_part):
         return self._by_leap_id.get(raw_part.id)
 
@@ -315,7 +317,7 @@ class OSCLeapListener(Leap.Listener):
 
     def send(self,name,val=None):
         msg = OSCMessage(name)
-        if val is None:
+        if val is not None:
             msg.append(val)
         r = self.client.send(msg)
         self.osc_messages_sent += 1
@@ -403,6 +405,7 @@ class BundledOSCLeapListener(OSCLeapListener):
         if self.current_bundle is None:
             super(BundledOSCLeapListener,self).send(name,val)
         else:
+            self.osc_messages_sent += 1
             #log("Bundle: %s\n" % self.current_bundle)
             msg = OSCMessage(name)
             if val is not None:
@@ -412,10 +415,18 @@ class BundledOSCLeapListener(OSCLeapListener):
     def send_frame_data(self, frame):
         self.current_bundle = OSCBundle()
         r = super(BundledOSCLeapListener,self).send_frame_data(frame)
-        if self.current_bundle:
+        if len(self.current_bundle.values()) > 0:
             self.client.send(self.current_bundle)
+            #log("%s\n" % self.current_bundle.values())
         self.current_bundle = None
         return r
+
+    # def send_vector(self, name, vector):
+    #     if hasattr(vector,'to_tuple'):
+    #         vec_tuple = vector.to_tuple()
+    #     else:
+    #         vec_tuple = vector
+    #     self.send("%sxyz" % name, vec_tuple)
 
 
 class TrackingOSCLeapListener(BundledOSCLeapListener):
