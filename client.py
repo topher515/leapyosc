@@ -1,3 +1,13 @@
+#
+#
+# Leapyosc 
+# Leap to OSC converter and OSC client
+#
+#
+# http://www.github.com/topher515/leapyosc/
+# @author ckwilcox@gmail.com
+#
+
 import Leap, sys
 import OSC
 from OSC import OSCClient, OSCMessage, OSCBundle
@@ -5,13 +15,22 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 from itertools import count
 
+from optparse import OptionParser
+
 
 DEBUG = True
 
-def log(m):
-    sys.stderr.write(str(m))
+def log(m, newline=False):
+    x = ("%s\n" % m) if newline else str(m)
+    sys.stderr.write(x)
     sys.stderr.flush()
 
+
+###############################
+###
+### 'Smart' Part Tracking 
+###
+###############################
 
 class RealPart(object):
     """
@@ -278,7 +297,20 @@ class RealFingerTracker(RealPartTracker):
         return self.get_real_parts()
 
 
+
+###############################
+###
+### OSC Conversion / Communication
+###
+###############################
+
+
 class OSCLeapListener(Leap.Listener):
+    """
+    Convert Leap hand and finger data into OSC format and 
+    send to OSC server.
+
+    """
 
     def __init__(self, *args, **kwargs):
         self.frame_count = 0
@@ -288,9 +320,10 @@ class OSCLeapListener(Leap.Listener):
         self.client = kwargs.pop('client', OSCClient())
         self.hostname = kwargs.pop('hostname', 'localhost')
         self.port = kwargs.pop('port', 8000)
-        self.dumb = kwargs.pop('dumb', False)
+        self.verbose = kwargs.pop('verbose', False)
+
         # OSC Connect
-        print "Connecting to OSC server at '%s:%s'" % (self.hostname,self.port)
+        log("Connecting to OSC server at '%s:%s'\n" % (self.hostname,self.port))
         self.client.connect((self.hostname, self.port))
         super(OSCLeapListener,self).__init__(*args,**kwargs)
 
@@ -300,20 +333,20 @@ class OSCLeapListener(Leap.Listener):
 
     def on_init(self, controller):
         self.send("/init")
-        print "Initialized OSC-Leap Listener"
+        log("Initialized OSC-Leap Listener\n")
 
     def on_connect(self, controller):
-        print "Connected to Leap"
+        log("Connected to Leap\n")
 
     def on_disconnect(self, controller):
-        print "Disconnected from Leap"
+        log("Disconnected from Leap\n")
 
     def on_exit(self, controller):
         try:
             self.send("/quit")
         except OSC.OSCClientError:
-            print "Disconnected from OSC server (unable to quit gracefully)"
-        print "Exited from OSC Leap Listener"
+            log("Disconnected from OSC server (unable to quit gracefully)\n")
+        log("Exited from OSC Leap Listener\n")
 
     def send(self,name,val=None):
         msg = OSCMessage(name)
@@ -395,15 +428,20 @@ class OSCLeapListener(Leap.Listener):
             # self.send_vector("%s/palm/d" % hand_base, hand.palm_direction)
 
 
-class BundledOSCLeapListener(OSCLeapListener):
+class BundledMixin(object):
+    """
+    Combine invidual OSC messages into bundles.
+
+    One bundle is sent per frame (so it will contain all hand and finger data.)
+    """
 
     def __init__(self, *args, **kwargs):
         self.current_bundle = None
-        super(BundledOSCLeapListener,self).__init__(*args,**kwargs)
+        super(BundledMixin,self).__init__(*args,**kwargs)
 
     def send(self, name, val=None):
         if self.current_bundle is None:
-            super(BundledOSCLeapListener,self).send(name,val)
+            super(BundledMixin,self).send(name,val)
         else:
             self.osc_messages_sent += 1
             #log("Bundle: %s\n" % self.current_bundle)
@@ -414,17 +452,25 @@ class BundledOSCLeapListener(OSCLeapListener):
 
     def send_frame_data(self, frame):
         self.current_bundle = OSCBundle()
-        r = super(BundledOSCLeapListener,self).send_frame_data(frame)
+        r = super(BundledMixin,self).send_frame_data(frame)
         if len(self.current_bundle.values()) > 0:
             self.client.send(self.current_bundle)
             #log("%s\n" % self.current_bundle.values())
         self.current_bundle = None
         return r
 
+
 class VectorAsArgsMixin(object):
     """
-    If vectors should be 'xyz' type addresses (with 3 float arguments)
-    then use this mixin.
+    Send Leap vector data values with one OSC address and multiple
+    OSC arguments. 
+        i.e., `/hand1/palm/dxyz 0.4 0.32 0.12`.
+    
+    Without this mixin, Leap vector data is sent with multiple OSC addresses.
+    and single arguments. 
+        i.e., `/hand1/palm/dx 0.4` 
+              `/hand1/palm/dy 0.32`
+              `/hand1/palm/dz 0.12`
     """
     def send_vector(self, name, vector):
         if hasattr(vector,'to_tuple'):
@@ -434,32 +480,109 @@ class VectorAsArgsMixin(object):
         self.send("%sxyz" % name, vec_tuple)
 
 
-class TrackingOSCLeapListener(BundledOSCLeapListener):
+class RealPartTrackerMixin(object):
+    """
+    Perform 'smart' tracking of body parts. 
+
+    - Hand and finger IDs are always lowest possible values (starting at 1)
+    - "Zero out" hand and finger data when the part is no longer tracked (
+        send multiple (0,0,0) tuples.)
+    """
 
     def __init__(self, *args, **kwargs):
-        super(TrackingOSCLeapListener, self).__init__(*args,**kwargs)
+        super(RealPartTrackerMixin, self).__init__(*args,**kwargs)
         self.real_hands_tracker = RealHandTracker()
 
     def on_frame(self, controller):
         self.real_hands_tracker.frame_tick(controller.frame())
-        r = super(TrackingOSCLeapListener,self).on_frame(controller)
+        r = super(RealPartTrackerMixin,self).on_frame(controller)
         return r
 
     def get_hands(self, frame):
         return self.real_hands_tracker.hands
 
 
-def main(hostname="localhost",port="8000"):
-    # Create a sample listener and controller
-    listener = TrackingOSCLeapListener(hostname=hostname, port=int(port))
+###############################
+###
+### Command Line Scripting 
+###
+###############################
+
+
+class RuntimeLeapListener(OSCLeapListener):
+    """
+    This class is the one run by the cli script.
+    It has its inheritance chain dynamically altered (by adding mixins)
+    depending on the options the user selected
+    """
+    pass
+
+
+def main(options, hostname, port):
+
+    # Now we append Mixin classes to our LeapListener's inheritance
+    # chain based on the options the user specified
+    # 
+    def runtime_mixin(class_, mixin):
+        class_.__bases__ = (mixin,) + class_.__bases__
+
+    if options.multi_arg:
+        runtime_mixin(RuntimeLeapListener, VectorAsArgsMixin)
+    if not options.dumb:
+        runtime_mixin(RuntimeLeapListener, RealPartTrackerMixin)
+    if not options.unbundled:
+        runtime_mixin(RuntimeLeapListener, BundledMixin)
+    # ok, that was weird. Now instantiate this listener
+    listener = RuntimeLeapListener(hostname=hostname, port=int(port),
+                        verbose=options.verbose)
     controller = Leap.Controller()
     controller.add_listener(listener)
 
     # Keep this process running until Enter is pressed
-    print "Press Enter to quit..."
+    log("Press Enter to quit...")
     sys.stdin.readline()
     controller.remove_listener(listener)
 
 
 if __name__ == "__main__":
-    main(*sys.argv[1:])
+
+    parser = OptionParser(usage="usage: %prog [options]")
+
+    #parser.add_option("-a", "--host", dest="host", type="string", 
+    #    action="store", default="localhost", 
+    #    help="the IP address or hostname to send packets to (default 'localhost')")
+
+    parser.add_option("-p", "--port", dest="port", type="int",
+        action="store", default="8000", 
+        help="the port to address packets to (defaults to '8000')")
+
+    parser.add_option("-m", "--multi-arg-vector", action="store_true", 
+        dest="multi_arg",
+        help="Send Leap vector data values with one OSC address and multiple "
+            "OSC arguments. i.e., `/hand1/palm/dxyz 0.4 0.32 0.12`. " 
+            "By default, Leap vector data is sent with multiple OSC addresses " 
+            "with a single argument per i.e.,` /hand1/palm/dx 0.4` " 
+            "`/hand1/palm/dy 0.32` `/hand1/palm/dz 0.12`.")
+
+    parser.add_option("-v", "--verbose", dest="verbose", action="store_true", 
+        help="Be more talkative")
+
+    parser.add_option("-d", "--dumb", dest="dumb", action="store_true",
+        help="Disable smart real hand tracking; This will cause raw hand and " 
+        "finger IDs to be sent over OSC. By default, 'realistic' hand and finger "
+        "IDs are maintained; this means, for instance, that a hand wont have " 
+        "fingers with IDs `3, 8, 17,` instead they are mapped to `1, 2, 3`.")
+
+    parser.add_option("-u", "--unbundled", dest="unbundled", action="store_true",
+        help="Turn off bundling of OSC message; each addressable message is sent "
+        "individually. By default, each Leap 'frame' is bundled into a single "
+        "OSC message.")
+
+    (opts, args_) = parser.parse_args() # Default is sys.argv[1:]
+
+    if len(args_) < 1:
+        host = 'localhost'
+    elif len(args_) == 1:
+        host = args_[0]
+
+    main(opts, host, opts.port)
