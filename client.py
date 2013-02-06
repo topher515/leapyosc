@@ -26,6 +26,9 @@ def log(m, newline=False):
     sys.stderr.flush()
 
 
+def ZERO():
+    return Leap.Vector(0.0,0.0,0.0)
+
 ###############################
 ###
 ### 'Smart' Part Tracking 
@@ -83,11 +86,11 @@ class RealFinger(RealPart):
 
     @property
     def tip_position(self):
-        return (0.0,0.0,0.0) if self.zeroed else self._raw_part.tip_position
+        return ZERO() if self.zeroed else self._raw_part.tip_position
 
     @property
     def direction(self):
-        return (0.0,0.0,0.0) if self.zeroed else self._raw_part.direction
+        return ZERO() if self.zeroed else self._raw_part.direction
 
     def __str__(self):
         return "<Finger%s>" % self.id
@@ -140,11 +143,11 @@ class RealHand(RealPart):
 
     @property
     def palm_position(self):
-        return (0,0,0) if self.zeroed else self._raw_part.palm_position
+        return ZERO() if self.zeroed else self._raw_part.palm_position
 
     @property
     def palm_normal(self):
-        return (0,0,0) if self.zeroed else self._raw_part.palm_normal
+        return ZERO() if self.zeroed else self._raw_part.palm_normal
 
     @property
     def __fingers(self):
@@ -330,6 +333,7 @@ class OSCLeapListener(Leap.Listener):
         self.count_at_log = 0
         self.time_at_log = datetime.now()
         self.osc_messages_sent_at_log = 0
+        self.previous_hands = set([])
 
     def on_init(self, controller):
         self.send("/init")
@@ -403,7 +407,11 @@ class OSCLeapListener(Leap.Listener):
 
     def send_frame_data(self, frame):
 
+        current_hands = set([])
+
         for hand in self.get_hands(frame):
+
+            current_hands.add(hand)
 
             hand_base = "/hand%d" % hand.id
 
@@ -426,6 +434,24 @@ class OSCLeapListener(Leap.Listener):
             self.send_vector("%s/palm/d" % hand_base, hand.palm_normal) 
             # Direction pointing from palm to fingers
             # self.send_vector("%s/palm/d" % hand_base, hand.palm_direction)
+
+        # When we lose a hand we should ZERO out the finger data for
+        # the missing hand
+        # Note: that in the current implementation we only send 1 ZEROing
+        # message. This packet could get lost!
+        # TODO: Determine if this will end up being "jittery" for when
+        # the hand gets lost suddenly
+        lost_hands = self.previous_hands - current_hands
+        if len(lost_hands) > 0:
+            for lost_hand in lost_hands:
+                for finger in lost_hand:
+                    hand_base = "/hand%d" % lost_hand.id
+                    self.send_vector("%s/finger%d/t" % (hand_base,finger.id),
+                                ZERO())
+                    self.send_vector("%s/finger%d/d" % (hand_base,finger.id),
+                                ZERO())
+
+        self.previous_hands = current_hands
 
 
 class BundledMixin(object):
@@ -485,8 +511,8 @@ class RealPartTrackerMixin(object):
     Perform 'smart' tracking of body parts. 
 
     - Hand and finger IDs are always lowest possible values (starting at 1)
-    - "Zero out" hand and finger data when the part is no longer tracked (
-        send multiple (0,0,0) tuples.)
+    - "Zero out" hand and finger data when the part is no longer tracked 
+        (send multiple (0.0,0.0,0.0) Vectors.)
     """
 
     def __init__(self, *args, **kwargs):
@@ -546,15 +572,15 @@ def main(options, hostname, port):
 
 if __name__ == "__main__":
 
-    parser = OptionParser(usage="usage: %prog [options]")
+    parser = OptionParser(usage="usage: %prog [options] [host] [port]")
 
     #parser.add_option("-a", "--host", dest="host", type="string", 
     #    action="store", default="localhost", 
     #    help="the IP address or hostname to send packets to (default 'localhost')")
-
     parser.add_option("-p", "--port", dest="port", type="int",
         action="store", default="8000", 
-        help="the port to address packets to (defaults to '8000')")
+        help="the port to address packets to (defaults to '8000'). (Note that "
+            "you can also specify the port as the last argument after 'host')")
 
     parser.add_option("-m", "--multi-arg-vector", action="store_true", 
         dest="multi_arg",
@@ -580,9 +606,13 @@ if __name__ == "__main__":
 
     (opts, args_) = parser.parse_args() # Default is sys.argv[1:]
 
+    port = None
     if len(args_) < 1:
         host = 'localhost'
-    elif len(args_) == 1:
+    elif len(args_) < 2:
         host = args_[0]
+    elif len(args_) < 3:
+        host = args_[0]
+        port = args_[1]
 
-    main(opts, host, opts.port)
+    main(opts, host, port or opts.port)
