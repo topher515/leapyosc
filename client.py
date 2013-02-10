@@ -15,6 +15,7 @@ from OSC import OSCClient, OSCMessage, OSCBundle
 from collections import defaultdict
 from datetime import datetime, timedelta
 from itertools import count
+from collections import defaultdict
 
 LeapListener = Leap.Listener
 
@@ -346,7 +347,8 @@ class OSCLeapListener(BaseLeapListener):
         self.count_at_log = 0
         self.time_at_log = datetime.now()
         self.osc_messages_sent_at_log = 0
-        self.previous_hands = set([])
+        self.previous_hands = defaultdict(list)
+
 
     def on_init(self, controller):
         self.send("/init")
@@ -414,11 +416,9 @@ class OSCLeapListener(BaseLeapListener):
 
     def send_frame_data(self, frame):
 
-        current_hands = set([])
+        current_hands = defaultdict(list)
 
         for hand in self.get_hands(frame):
-
-            current_hands.add(hand)
 
             hand_base = "/hand%d" % hand.id
 
@@ -428,6 +428,7 @@ class OSCLeapListener(BaseLeapListener):
                             finger.tip_position)
                 self.send_vector("%s/finger%d/d" % (hand_base,finger.id),
                             finger.direction)
+                current_hands[hand.id].append(finger.id)
 
             ## Handle palm
             # Relative point position of palm
@@ -441,17 +442,18 @@ class OSCLeapListener(BaseLeapListener):
         # the missing hand
         # Note: that in the current implementation we only send 1 ZEROing
         # message. This packet could get lost!
-        # TODO: Determine if this will end up being "jittery" for when
-        # the hand gets lost suddenly
-        lost_hands = self.previous_hands - current_hands
+        lost_hands = set(self.previous_hands.keys()) - set(current_hands.keys())
         if len(lost_hands) > 0:
-            for lost_hand in lost_hands:
-                for finger in lost_hand:
-                    hand_base = "/hand%d" % lost_hand.id
-                    self.send_vector("%s/finger%d/t" % (hand_base,finger.id),
+            for lost_hand_key in lost_hands:
+                hand_base = '/hand%d' % lost_hand_key
+                for finger_key in self.previous_hands[lost_hand_key]:
+                    self.send_vector("%s/finger%d/t" % (hand_base,finger_key),
                                 ZERO())
-                    self.send_vector("%s/finger%d/d" % (hand_base,finger.id),
+                    self.send_vector("%s/finger%d/d" % (hand_base,finger_key),
                                 ZERO())
+                self.send_vector("%s/palm/t" % hand_base, ZERO())
+                self.send_vector("%s/palm/d" % hand_base, ZERO())
+                log("Clear lost hand %s\n" % lost_hand_key) 
 
         self.previous_hands = current_hands
 
