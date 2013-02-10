@@ -350,6 +350,13 @@ class OSCLeapListener(BaseLeapListener):
         self.previous_hands = defaultdict(list)
 
 
+    def pre_send_x(self, val):
+        return val
+    def pre_send_y(self, val):
+        return val
+    def pre_send_z(self, val):
+        return val
+
     def on_init(self, controller):
         self.send("/init")
         super(OSCLeapListener,self).on_init(controller)
@@ -370,9 +377,9 @@ class OSCLeapListener(BaseLeapListener):
         return r
 
     def send_vector(self, base, vector):
-        self.send("%sx" % base, vector[0])
-        self.send("%sy" % base, vector[1])
-        self.send("%sz" % base, vector[2])
+        self.send("%sx" % base, self.pre_send_x(vector[0]))
+        self.send("%sy" % base, self.pre_send_y(vector[1]))
+        self.send("%sz" % base, self.pre_send_z(vector[2]))
 
 
     def print_frame(self, frame):
@@ -530,6 +537,37 @@ class RealPartTrackerMixin(object):
 
     def get_hands(self, frame):
         return self.real_hands_tracker.hands
+
+
+
+class LinearScalingMixin(object):
+
+    def __init__(self, x_mm_min=None, x_mm_max=None, y_mm_min=None, y_mm_max=None, 
+                    z_mm_min=None, z_mm_max=None, *args, **kwargs):
+        self.x_mm_min = x_mm_min
+        self.x_mm_max = x_mm_max
+        self.y_mm_min = y_mm_min
+        self.y_mm_max = y_mm_max
+        self.z_mm_min = z_mm_min
+        self.z_mm_max = z_mm_max
+        super(LinearScalingMixin,self).__init__(*args, **kwargs)
+
+    def _calc(self, name, val):
+        min_ = getattr(self,'%s_mm_min' % name)
+        max_ = getattr(self,'%s_mm_max' % name)
+        if min_ is not None and max_ is not None:
+            return (float(val - min_) / (max_ - min_)) - 0.5
+        else:
+            return val
+
+    def pre_send_x(self,val):
+        return self._calc('x', val) 
+
+    def pre_send_y(self,val):
+        return self._calc('y', val)
+
+    def pre_send_z(self,val):
+        return self._calc('z', val)
 
 
 ###############################
