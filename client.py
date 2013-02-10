@@ -8,12 +8,15 @@
 # @author ckwilcox@gmail.com
 #
 
-import Leap, sys
+import Leap
+import sys
 import OSC
 from OSC import OSCClient, OSCMessage, OSCBundle
 from collections import defaultdict
 from datetime import datetime, timedelta
 from itertools import count
+
+LeapListener = Leap.Listener
 
 from optparse import OptionParser
 
@@ -308,7 +311,18 @@ class RealFingerTracker(RealPartTracker):
 ###############################
 
 
-class OSCLeapListener(Leap.Listener):
+class BaseLeapListener(LeapListener):
+    def on_init(self, controller):
+        log("Initialized OSC-Leap Listener\n")
+
+    def on_connect(self, controller):
+        log("Connected to Leap\n")
+
+    def on_disconnect(self, controller):
+        log("Disconnected from Leap\n")
+
+
+class OSCLeapListener(BaseLeapListener):
     """
     Convert Leap hand and finger data into OSC format and 
     send to OSC server.
@@ -318,7 +332,6 @@ class OSCLeapListener(Leap.Listener):
     def __init__(self, *args, **kwargs):
         self.frame_count = 0
         self.osc_messages_sent = 0
-        self.saw_finger = False
         # Settings
         self.client = kwargs.pop('client', OSCClient())
         self.hostname = kwargs.pop('hostname', 'localhost')
@@ -337,13 +350,7 @@ class OSCLeapListener(Leap.Listener):
 
     def on_init(self, controller):
         self.send("/init")
-        log("Initialized OSC-Leap Listener\n")
-
-    def on_connect(self, controller):
-        log("Connected to Leap\n")
-
-    def on_disconnect(self, controller):
-        log("Disconnected from Leap\n")
+        super(OSCLeapListener,self).on_init(controller)
 
     def on_exit(self, controller):
         try:
@@ -414,11 +421,6 @@ class OSCLeapListener(Leap.Listener):
             current_hands.add(hand)
 
             hand_base = "/hand%d" % hand.id
-
-            if hand.fingers.empty:
-                self.saw_finger = False
-            else:
-                self.saw_finger = True
 
             ## Handle fingers
             for finger in hand.fingers:
