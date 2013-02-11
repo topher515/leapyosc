@@ -173,6 +173,9 @@ class RealPartTracker(object):
         self.part_miss_count = part_miss_count
         self.frame_count = 0
 
+
+        self._new_raw_parts = {}
+
     #def __str__(self):
     #    def _(x):
     #        return self._real_parts.get(x,None)
@@ -194,14 +197,16 @@ class RealPartTracker(object):
         return (self.frame_count - real_part.last_seen_frame) >= self.part_miss_count
 
     def is_really_old_part(self, real_part):
-        return (self.frame_count - real_part.last_seen_frame) >= (self.part_miss_count * 10)
+        return (self.frame_count - real_part.last_seen_frame) >= (self.part_miss_count * 2)
 
     def handle_old_part(self, real_part):
         # Zero out the old hand
+        log("Zeroing lost %s:%s\n" % (self.__class__.__name__, real_part.id) )
         real_part.zeroed = True
 
     def handle_really_old_part(self, real_part):
         # Completely remove the real hand from our tracking
+        log("Drop lost %s:%s\n" % (self.__class__.__name__, real_part.id) )
         del self._real_parts[real_part.id]
         del self._by_leap_id[real_part.leap_id]
 
@@ -225,12 +230,19 @@ class RealPartTracker(object):
 
 
     def handle_raw_part(self, raw_part):
+
+        # last_seen = self._new_raw_parts.get(raw_part.id)
+        # self._new_raw_parts[raw_part.id] = self.frame_count
+        # if not last_seen or self.frame_count - last_seen < 3:
+        #     return
+
         real_part = self.get_real_part(raw_part)
         if real_part:
             real_part.mark_seen()
             real_part.update_raw(raw_part)
         else:
             real_part = self.RealPart(raw_part, tracker=self)
+            
 
     def claim_next_real_number(self, real_part):
         real_num = None
