@@ -96,6 +96,10 @@ class RealFinger(RealPart):
     def direction(self):
         return ZERO() if self.zeroed else self._raw_part.direction
 
+    @property
+    def is_extended(self):
+        return false if self.zeroed else self._raw_part.is_extended
+
     def __str__(self):
         return "<Finger%s>" % self.id
 
@@ -447,6 +451,8 @@ class OSCLeapListener(BaseLeapListener):
                             finger.tip_position)
                 self.send_vector("%s/finger%d/d" % (hand_base,finger.id),
                             finger.direction)
+                self.send("%s/finger%d/extended" % (hand_base,finger.id),
+                            1 if finger.is_extended else 0)
                 current_hands[hand.id].append(finger.id)
 
             ## Handle palm
@@ -470,6 +476,8 @@ class OSCLeapListener(BaseLeapListener):
                                 ZERO())
                     self.send_vector("%s/finger%d/d" % (hand_base,finger_key),
                                 ZERO())
+                    self.send("%s/finger%d/extended" % (hand_base,finger_key),
+                                0)
                 self.send_vector("%s/palm/t" % hand_base, ZERO())
                 self.send_vector("%s/palm/d" % hand_base, ZERO())
                 log("Clear lost hand %s\n" % lost_hand_key) 
