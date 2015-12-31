@@ -413,7 +413,7 @@ class OSCLeapListener(BaseLeapListener):
         time_diff = datetime.now() - self.time_at_log
         #log(time_diff)
         if time_diff >= timedelta(seconds=1):
-            log("Saw %s frames; Sent %4s messges in %s.\n" % 
+            log("Saw %s frames; Sent %4s messages in %s.\n" % 
                         (self.frame_count - self.count_at_log,
                         self.osc_messages_sent - self.osc_messages_sent_at_log,
                         time_diff))
