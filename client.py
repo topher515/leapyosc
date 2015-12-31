@@ -624,6 +624,7 @@ def main(options, hostname, port):
     listener = RuntimeLeapListener(hostname=hostname, port=int(port),
                         verbose=options.verbose)
     controller = Leap.Controller()
+    controller.set_policy(Leap.Controller.POLICY_BACKGROUND_FRAMES)
     controller.add_listener(listener)
 
     # Keep this process running until Enter is pressed
