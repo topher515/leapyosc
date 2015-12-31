@@ -96,6 +96,10 @@ class RealFinger(RealPart):
     def direction(self):
         return ZERO() if self.zeroed else self._raw_part.direction
 
+    @property
+    def is_extended(self):
+        return false if self.zeroed else self._raw_part.is_extended
+
     def __str__(self):
         return "<Finger%s>" % self.id
 
@@ -409,7 +413,7 @@ class OSCLeapListener(BaseLeapListener):
         time_diff = datetime.now() - self.time_at_log
         #log(time_diff)
         if time_diff >= timedelta(seconds=1):
-            log("Saw %s frames; Sent %4s messges in %s.\n" % 
+            log("Saw %s frames; Sent %4s messages in %s.\n" % 
                         (self.frame_count - self.count_at_log,
                         self.osc_messages_sent - self.osc_messages_sent_at_log,
                         time_diff))
@@ -447,6 +451,8 @@ class OSCLeapListener(BaseLeapListener):
                             finger.tip_position)
                 self.send_vector("%s/finger%d/d" % (hand_base,finger.id),
                             finger.direction)
+                self.send("%s/finger%d/extended" % (hand_base,finger.id),
+                            1 if finger.is_extended else 0)
                 current_hands[hand.id].append(finger.id)
 
             ## Handle palm
@@ -470,6 +476,8 @@ class OSCLeapListener(BaseLeapListener):
                                 ZERO())
                     self.send_vector("%s/finger%d/d" % (hand_base,finger_key),
                                 ZERO())
+                    self.send("%s/finger%d/extended" % (hand_base,finger_key),
+                                0)
                 self.send_vector("%s/palm/t" % hand_base, ZERO())
                 self.send_vector("%s/palm/d" % hand_base, ZERO())
                 log("Clear lost hand %s\n" % lost_hand_key) 
@@ -616,6 +624,7 @@ def main(options, hostname, port):
     listener = RuntimeLeapListener(hostname=hostname, port=int(port),
                         verbose=options.verbose)
     controller = Leap.Controller()
+    controller.set_policy(Leap.Controller.POLICY_BACKGROUND_FRAMES)
     controller.add_listener(listener)
 
     # Keep this process running until Enter is pressed
